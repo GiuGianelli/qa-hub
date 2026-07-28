@@ -133,7 +133,7 @@ JQL rules:
 - Only add sprint filter if the user explicitly mentions "this sprint", "current sprint", or "open sprint" — otherwise do NOT include any sprint clause
 - For "on hold" or "blocked" metrics include: statusCategory != Done
 - Keep the JQL valid for Jira Cloud
-- Example without sprint: project = "${proj}" AND component = "Risk Engineering" AND comment ~ "On Hold because there is dependency from another team"
+- Example without sprint: project = "${proj}" AND component = "Team Engineering" AND comment ~ "On Hold because there is dependency from another team"
 - Example with sprint (only when user asks): project = "${proj}" AND component = "Risk Engineering" AND comment ~ "On Hold because there is dependency from another team" AND sprint in openSprints()`
 
     try {

@@ -531,30 +531,52 @@ export default function TestCases({ cases, onChange, issueInfo, style }) {
   function set(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: undefined }))
-    if (FILL_ALL_FIELDS.includes(field) && cases.length > 0) {
-      onChange(cases.map(c => ({ ...c, [field]: value })))
-    }
   }
 
   function addCase() {
     const errs = validate(form)
     if (Object.keys(errs).length) { setErrors(errs); return }
     if (editingIndex !== null) {
-      const updated = [...cases]
-      updated[editingIndex] = { ...form }
+      const updated = cases.map((c, i) => {
+        if (i === editingIndex) return { ...form }
+        const patched = { ...c }
+        FILL_ALL_FIELDS.forEach(f => { if (!c[f] && form[f]) patched[f] = form[f] })
+        return patched
+      })
       onChange(updated)
       setEditingIndex(null)
     } else {
-      onChange([...cases, { ...form }])
+      const saved = { ...form }
+      const patched = cases.map(c => {
+        const p = { ...c }
+        FILL_ALL_FIELDS.forEach(f => { if (!c[f] && saved[f]) p[f] = saved[f] })
+        return p
+      })
+      onChange([...patched, saved])
     }
     setForm(EMPTY_FORM)
+    setFolderSearch('')
     setShowForm(false)
   }
 
   function editCase(i) {
-    setForm({ ...cases[i] })
+    const c = cases[i]
+    setForm({ ...c })
     setEditingIndex(i)
     setShowForm(true)
+    if (c.folderId) {
+      const byId = Object.fromEntries(folders.map(f => [f.id, f]))
+      function getPath(f) {
+        const parts = []
+        let cur = f
+        while (cur) { parts.unshift(cur.name); cur = cur.parentId ? byId[cur.parentId] : null }
+        return parts.join(' / ')
+      }
+      const found = folders.find(f => String(f.id) === String(c.folderId))
+      setFolderSearch(found ? getPath(found) : '')
+    } else {
+      setFolderSearch('')
+    }
   }
 
   function cancelEdit() {
@@ -562,6 +584,7 @@ export default function TestCases({ cases, onChange, issueInfo, style }) {
     setErrors({})
     setEditingIndex(null)
     setShowForm(false)
+    setFolderSearch('')
   }
 
   function removeCase(i) {
@@ -637,7 +660,26 @@ export default function TestCases({ cases, onChange, issueInfo, style }) {
           <button
             className="secondary"
             style={{ fontSize: 12, padding: '4px 12px' }}
-            onClick={() => setShowForm(true)}
+            onClick={() => {
+              if (cases.length > 0) {
+                const last = cases[cases.length - 1]
+                const prefill = {}
+                FILL_ALL_FIELDS.forEach(f => { if (last[f]) prefill[f] = last[f] })
+                setForm(prev => ({ ...prev, ...prefill }))
+                if (last.folderId) {
+                  const byId = Object.fromEntries(folders.map(fo => [fo.id, fo]))
+                  function getPath(fo) {
+                    const parts = []
+                    let cur = fo
+                    while (cur) { parts.unshift(cur.name); cur = cur.parentId ? byId[cur.parentId] : null }
+                    return parts.join(' / ')
+                  }
+                  const found = folders.find(fo => String(fo.id) === String(last.folderId))
+                  if (found) setFolderSearch(getPath(found))
+                }
+              }
+              setShowForm(true)
+            }}
           >
             + Add Test Case
           </button>
