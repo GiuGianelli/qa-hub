@@ -1,0 +1,522 @@
+const { ipcMain, shell, BrowserWindow } = require('electron')
+const path = require('path')
+const fs = require('fs')
+const { ROOT, loadEnv } = require('../lib/env')
+const { zephyrRequest } = require('../lib/zephyrHttp')
+const { esc, renderMd, row, rowRich } = require('../lib/html')
+const {
+  Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell,
+  WidthType, BorderStyle, ShadingType, AlignmentType, PageBreak,
+} = require('docx')
+
+function renderPreconditionImages(images) {
+  if (!images?.length) return ''
+  const imgs = images.map(img => `<img src="${img.data}" alt="${esc(img.name)}" style="max-width:300px;max-height:200px;border-radius:4px;border:1px solid #ddd">`).join('')
+  return `<div style="padding:8px 12px;border-top:1px solid #f0f0f0"><div style="font-size:11px;color:#aaa;text-transform:uppercase;margin-bottom:6px">Precondition Images</div><div style="display:flex;flex-wrap:wrap;gap:8px">${imgs}</div></div>`
+}
+
+function renderConfigNotes(cn) {
+  if (Array.isArray(cn) && cn.length > 0) return `<table>${cn.map(f => row(esc(f.name), f.value)).join('')}</table>`
+  if (typeof cn === 'string' && cn.trim()) return `<div class="config">${renderMd(cn)}</div>`
+  return '<span style="color:#888">—</span>'
+}
+
+function register() {
+  ipcMain.handle('generate-report', (_, { issueInfo, configNotes, qaNotes, impacts, cases }) => {
+    const date = new Date().toLocaleString('en-GB')
+
+    const casesHtml = cases.length === 0
+      ? '<p style="color:#888">No test cases added.</p>'
+      : cases.map((tc, i) => `
+        <div class="tc">
+          <div class="tc-header">${i + 1}. ${esc(tc.name)}</div>
+          <table>
+            ${row('Status', tc.status)}
+            ${row('Priority', tc.priority)}
+            ${tc.objective ? row('Objective', tc.objective) : ''}
+            ${tc.precondition ? rowRich('Precondition', tc.precondition) : ''}
+            ${tc.assignee ? row('Assignee', tc.assignee) : ''}
+            ${tc.productComponent ? row('Product Component', tc.productComponent) : ''}
+            ${tc.squadTeam ? row('Squad / Team', tc.squadTeam) : ''}
+            ${tc.regressionTests ? row('Regression Tests?', tc.regressionTests) : ''}
+          </table>
+          ${renderPreconditionImages(tc.preconditionImages)}
+          ${tc.scenario ? `<div class="bdd"><pre>${esc(tc.scenario)}</pre></div>` : ''}
+        </div>`).join('')
+
+    const notesHtml = qaNotes.length === 0
+      ? '<p style="color:#888">No notes.</p>'
+      : `<ul>${qaNotes.map(n => `<li>${renderMd(n)}</li>`).join('')}</ul>`
+
+    const impactsHtml = (impacts || []).length === 0
+      ? '<p style="color:#888">No impacts identified.</p>'
+      : `<ul>${impacts.map(n => `<li>${renderMd(n)}</li>`).join('')}</ul>`
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>QA Report${issueInfo.issue ? ' — ' + esc(issueInfo.issue) : ''}</title>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: #222; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 20px; border-bottom: 2px solid #e94560; padding-bottom: 8px; margin-bottom: 20px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #888; margin: 28px 0 10px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #f7f7f7; padding: 14px; border-radius: 6px; }
+    .meta span { color: #555; } .meta strong { color: #222; }
+    .tc { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 14px; overflow: hidden; }
+    .tc-header { background: #f0f0f0; padding: 8px 12px; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 5px 12px; border-bottom: 1px solid #f0f0f0; }
+    td:first-child { width: 160px; color: #888; font-size: 11px; text-transform: uppercase; }
+    .bdd { background: #1a1a2e; padding: 12px; }
+    .bdd pre { margin: 0; color: #7fcfaf; font-size: 12px; white-space: pre-wrap; }
+    ul { padding-left: 20px; } li { margin-bottom: 5px; }
+    .config { background: #f7f7f7; padding: 12px; border-radius: 6px; white-space: pre-wrap; font-size: 12px; color: #444; }
+    .footer { margin-top: 40px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>QA Report</h1>
+  <div class="meta">
+    <div><span>Issue: </span><strong>${issueInfo.issue ? `<a href="${esc(issueInfo.issue)}">${esc(issueInfo.issue)}</a>` : '—'}</strong></div>
+    <div><span>Date: </span><strong>${date}</strong></div>
+    <div><span>Developer: </span><strong>${esc(issueInfo.dev) || '—'}</strong></div>
+    <div><span>QA: </span><strong>${esc(issueInfo.qa) || '—'}</strong></div>
+  </div>
+  <h2>Additional &amp; Default Configuration</h2>
+  ${renderConfigNotes(configNotes)}
+  <h2>QA Notes</h2>
+  ${notesHtml}
+  <h2>Possible Impacts</h2>
+  ${impactsHtml}
+  <h2>Test Cases (${cases.length})</h2>
+  ${casesHtml}
+  <div class="footer">Generated by QA Hub · ${date}</div>
+</body>
+</html>`
+
+    const reportsDir = path.join(ROOT, 'reports')
+    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir)
+    const reportPath = path.join(reportsDir, `qa-report-${Date.now()}.html`)
+    fs.writeFileSync(reportPath, html, 'utf-8')
+    shell.openExternal('file://' + reportPath)
+    return { path: reportPath }
+  })
+
+  ipcMain.handle('generate-cycle-report', async (_, { cycleKey }) => {
+    const { token, project } = loadEnv()
+    if (!token) return { error: 'ZEPHYR_TOKEN not set' }
+
+    const cycle = await zephyrRequest('GET', `/testcycles/${encodeURIComponent(cycleKey)}`, token).catch(e => ({ error: e.message }))
+    if (cycle.error) return { error: cycle.error }
+
+    let executions = [], statusMap = {}
+    try {
+      const statuses = await zephyrRequest('GET', `/statuses?projectKey=${encodeURIComponent(project)}&statusType=TEST_EXECUTION&maxResults=100`, token)
+      for (const s of (statuses.values || [])) statusMap[s.id] = s.name
+    } catch (e) {}
+
+    try {
+      const execs = await zephyrRequest('GET', `/testexecutions?projectKey=${encodeURIComponent(project)}&testCycle=${encodeURIComponent(cycleKey)}&maxResults=200`, token)
+      executions = (Array.isArray(execs.values) ? execs.values : []).map(e => {
+        const keyMatch = (e.testCase?.self || '').match(/\/testcases\/([\w-]+)\//)
+        return {
+          key: keyMatch ? keyMatch[1] : '—',
+          name: e.testCase?.name || '',
+          status: (e.testExecutionStatus && statusMap[e.testExecutionStatus.id]) || 'Not Executed',
+          comment: e.comment || '',
+        }
+      })
+    } catch (e) {}
+
+    const date = new Date().toLocaleString('en-GB')
+    const statusColor = { 'Pass': '#3ecf8e', 'Fail': '#e94560', 'Not Executed': '#888', 'In Progress': '#f0a500', 'Blocked': '#ff6b6b' }
+
+    const rowsHtml = executions.length === 0
+      ? '<tr><td colspan="3" style="color:#888;text-align:center;padding:16px">No executions found.</td></tr>'
+      : executions.map((e, i) => `
+        <tr>
+          <td style="color:#888;font-size:11px">${i + 1}</td>
+          <td><span style="font-family:monospace;color:#e94560;margin-right:8px">${esc(e.key)}</span>${esc(e.name)}</td>
+          <td><span style="color:${statusColor[e.status] || '#ccc'};font-weight:600">${esc(e.status)}</span>${e.comment ? `<div style="font-size:11px;color:#888;margin-top:2px">${esc(e.comment)}</div>` : ''}</td>
+        </tr>`).join('')
+
+    const passed = executions.filter(e => e.status === 'Pass').length
+    const failed = executions.filter(e => e.status === 'Fail').length
+    const notRun = executions.filter(e => e.status === 'Not Executed').length
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Cycle Report — ${esc(cycle.name || cycleKey)}</title>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: #222; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 20px; border-bottom: 2px solid #e94560; padding-bottom: 8px; margin-bottom: 20px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #888; margin: 28px 0 10px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #f7f7f7; padding: 14px; border-radius: 6px; margin-bottom: 20px; }
+    .meta span { color: #555; } .meta strong { color: #222; }
+    .summary { display: flex; gap: 16px; margin-bottom: 20px; }
+    .chip { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 8px 12px; background: #f0f0f0; font-size: 11px; text-transform: uppercase; color: #888; }
+    td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    td:first-child { width: 32px; color: #bbb; }
+    td:last-child { width: 140px; }
+    .footer { margin-top: 40px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Cycle Report</h1>
+  <div class="meta">
+    <div><span>Cycle: </span><strong>${esc(cycle.name || cycleKey)}</strong></div>
+    <div><span>Key: </span><strong style="font-family:monospace">${esc(String(cycle.key || cycleKey))}</strong></div>
+    <div><span>Date: </span><strong>${date}</strong></div>
+    ${cycle.plannedStartDate ? `<div><span>Period: </span><strong>${esc(cycle.plannedStartDate.slice(0, 10))} → ${esc((cycle.plannedEndDate || '').slice(0, 10) || '—')}</strong></div>` : ''}
+    ${cycle.folder?.name ? `<div><span>Folder: </span><strong>${esc(cycle.folder.name)}</strong></div>` : ''}
+    ${cycle.description ? `<div style="grid-column:1/-1"><span>Description: </span><strong>${esc(cycle.description)}</strong></div>` : ''}
+  </div>
+  <div class="summary">
+    <div class="chip" style="background:#d4f5e7;color:#1a7a4a">✓ Pass: ${passed}</div>
+    <div class="chip" style="background:#fde8eb;color:#c0253a">✗ Fail: ${failed}</div>
+    <div class="chip" style="background:#f0f0f0;color:#666">— Not Executed: ${notRun}</div>
+    <div class="chip" style="background:#e8eaf0;color:#444">Total: ${executions.length}</div>
+  </div>
+  <h2>Test Cases (${executions.length})</h2>
+  <table>
+    <thead><tr><th>#</th><th>Test Case</th><th>Status</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="footer">Generated by QA Hub · ${date}</div>
+</body>
+</html>`
+
+    const reportsDir = path.join(ROOT, 'reports')
+    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir)
+    const reportPath = path.join(reportsDir, `cycle-report-${Date.now()}.html`)
+    fs.writeFileSync(reportPath, html, 'utf-8')
+    shell.openExternal('file://' + reportPath)
+    return { path: reportPath }
+  })
+
+  ipcMain.handle('generate-full-report', async (_, { issueInfo, configNotes, qaNotes, impacts, cases, cycleKey }) => {
+    const date = new Date().toLocaleString('en-GB')
+    const { token, project } = loadEnv()
+
+    let cycle = null, executions = []
+    if (cycleKey && token) {
+      try {
+        cycle = await zephyrRequest('GET', `/testcycles/${encodeURIComponent(cycleKey)}`, token).catch(() => null)
+        let statusMap = {}
+        try {
+          const statuses = await zephyrRequest('GET', `/statuses?projectKey=${encodeURIComponent(project)}&statusType=TEST_EXECUTION&maxResults=100`, token)
+          for (const s of (statuses.values || [])) statusMap[s.id] = s.name
+        } catch (e) {}
+        const execs = await zephyrRequest('GET', `/testexecutions?projectKey=${encodeURIComponent(project)}&testCycle=${encodeURIComponent(cycleKey)}&maxResults=200`, token)
+        executions = (Array.isArray(execs.values) ? execs.values : []).map(e => {
+          const keyMatch = (e.testCase?.self || '').match(/\/testcases\/([\w-]+)\//)
+          return {
+            key: keyMatch ? keyMatch[1] : '—',
+            name: e.testCase?.name || '',
+            status: (e.testExecutionStatus && statusMap[e.testExecutionStatus.id]) || 'Not Executed',
+          }
+        })
+      } catch (e) {}
+    }
+
+    const statusColor = { 'Pass': '#1a7a4a', 'Fail': '#c0253a', 'Not Executed': '#888', 'In Progress': '#b07800', 'Blocked': '#cc3300' }
+    const statusBg = { 'Pass': '#d4f5e7', 'Fail': '#fde8eb', 'Not Executed': '#f0f0f0', 'In Progress': '#fff3cd', 'Blocked': '#ffe0e0' }
+
+    const notesHtml = qaNotes.length === 0
+      ? '<p style="color:#888">No notes.</p>'
+      : `<ul>${qaNotes.map(n => `<li>${renderMd(n)}</li>`).join('')}</ul>`
+
+    const impactsHtml = (impacts || []).length === 0
+      ? '<p style="color:#888">No impacts identified.</p>'
+      : `<ul>${impacts.map(n => `<li>${renderMd(n)}</li>`).join('')}</ul>`
+
+    const casesHtml = cases.length === 0
+      ? '<p style="color:#888">No test cases.</p>'
+      : cases.map((tc, i) => `
+        <div class="tc">
+          <div class="tc-header">
+            <span class="tc-num">${i + 1}</span>
+            ${esc(tc.name)}
+            <span class="badge" style="background:${tc.priority === 'High' || tc.priority === 'Critical' ? '#fde8eb' : '#d4f5e7'};color:${tc.priority === 'High' || tc.priority === 'Critical' ? '#c0253a' : '#1a7a4a'}">${esc(tc.priority)}</span>
+          </div>
+          <table>
+            ${row('Status', tc.status)}
+            ${tc.objective ? rowRich('Objective', tc.objective) : ''}
+            ${tc.precondition ? rowRich('Precondition', tc.precondition) : ''}
+            ${tc.productComponent ? row('Component', tc.productComponent) : ''}
+            ${tc.squadTeam ? row('Squad / Team', tc.squadTeam) : ''}
+            ${tc.regressionTests ? row('Regression?', tc.regressionTests) : ''}
+          </table>
+          ${tc.scenario ? `<div class="bdd"><pre>${esc(tc.scenario)}</pre></div>` : ''}
+        </div>`).join('')
+
+    const passed = executions.filter(e => e.status === 'Pass').length
+    const failed = executions.filter(e => e.status === 'Fail').length
+    const notRun = executions.filter(e => e.status === 'Not Executed').length
+
+    const cycleSection = cycle ? `
+  <h2>Test Cycle</h2>
+  <div class="meta" style="margin-bottom:16px">
+    <div><span>Cycle: </span><strong>${esc(cycle.name || cycleKey)}</strong></div>
+    <div><span>Key: </span><strong style="font-family:monospace">${esc(String(cycle.key || cycleKey))}</strong></div>
+    ${cycle.plannedStartDate ? `<div><span>Period: </span><strong>${esc(cycle.plannedStartDate.slice(0, 10))} → ${esc((cycle.plannedEndDate || '').slice(0, 10) || '—')}</strong></div>` : ''}
+    ${cycle.folder?.name ? `<div><span>Folder: </span><strong>${esc(cycle.folder.name)}</strong></div>` : ''}
+  </div>
+  <div class="summary">
+    <div class="chip" style="background:#d4f5e7;color:#1a7a4a">✓ Pass: ${passed}</div>
+    <div class="chip" style="background:#fde8eb;color:#c0253a">✗ Fail: ${failed}</div>
+    <div class="chip" style="background:#f0f0f0;color:#666">— Not Executed: ${notRun}</div>
+    <div class="chip" style="background:#e8eaf0;color:#444">Total: ${executions.length}</div>
+  </div>
+  ${executions.length > 0 ? `
+  <table style="margin-top:12px">
+    <thead><tr><th>#</th><th>Test Case</th><th>Status</th></tr></thead>
+    <tbody>${executions.map((e, i) => `
+      <tr>
+        <td style="color:#bbb;font-size:11px">${i + 1}</td>
+        <td><span style="font-family:monospace;color:#e94560;margin-right:8px">${esc(e.key)}</span>${esc(e.name)}</td>
+        <td><span class="badge" style="background:${statusBg[e.status] || '#f0f0f0'};color:${statusColor[e.status] || '#444'}">${esc(e.status)}</span></td>
+      </tr>`).join('')}
+    </tbody>
+  </table>` : ''}` : ''
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Full QA Report${issueInfo.issue ? ' — ' + esc(issueInfo.issue) : ''}</title>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: #222; max-width: 960px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 22px; border-bottom: 3px solid #e94560; padding-bottom: 10px; margin-bottom: 24px; }
+    h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #999; margin: 32px 0 10px; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #f7f7f7; padding: 14px; border-radius: 6px; }
+    .meta span { color: #777; } .meta strong { color: #222; }
+    .summary { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+    .chip { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+    .badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .tc { border: 1px solid #e8e8e8; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
+    .tc-header { background: #f5f5f5; padding: 8px 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .tc-num { color: #bbb; font-size: 11px; min-width: 18px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 7px 12px; background: #f5f5f5; font-size: 11px; text-transform: uppercase; color: #999; }
+    td { padding: 6px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .tc table td:first-child { width: 150px; color: #999; font-size: 11px; text-transform: uppercase; }
+    .bdd { background: #1a1a2e; padding: 12px 14px; }
+    .bdd pre { margin: 0; color: #7fcfaf; font-size: 12px; white-space: pre-wrap; font-family: 'Menlo', monospace; }
+    ul { padding-left: 20px; } li { margin-bottom: 6px; line-height: 1.5; }
+    .config { background: #f7f7f7; padding: 12px 14px; border-radius: 6px; white-space: pre-wrap; font-size: 12px; color: #444; }
+    .footer { margin-top: 48px; font-size: 11px; color: #bbb; border-top: 1px solid #eee; padding-top: 12px; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>QA Report${issueInfo.issue ? ' — ' + esc(issueInfo.issue) : ''}</h1>
+  <div class="meta">
+    <div><span>Issue: </span><strong>${esc(issueInfo.issue) || '—'}</strong></div>
+    <div><span>Date: </span><strong>${date}</strong></div>
+    <div><span>Developer: </span><strong>${esc(issueInfo.dev) || '—'}</strong></div>
+    <div><span>QA: </span><strong>${esc(issueInfo.qa) || '—'}</strong></div>
+  </div>
+  ${renderConfigNotes(configNotes)}
+  <h2>QA Notes</h2>
+  ${notesHtml}
+  <h2>Possible Impacts</h2>
+  ${impactsHtml}
+  <h2>Test Cases (${cases.length})</h2>
+  ${casesHtml}
+  ${cycleSection}
+  <div class="footer">Generated by QA Hub · ${date}</div>
+</body>
+</html>`
+
+    const reportsDir = path.join(ROOT, 'reports')
+    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir)
+    const reportPath = path.join(reportsDir, `full-report-${Date.now()}.html`)
+    fs.writeFileSync(reportPath, html, 'utf-8')
+    shell.openExternal('file://' + reportPath)
+    return { path: reportPath }
+  })
+}
+
+  ipcMain.handle('generate-docx-report', async (_, { issueInfo, configNotes, qaNotes, impacts, cases }) => {
+    const date = new Date().toLocaleString('en-GB')
+
+    function metaRow(label, value) {
+      return new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 25, type: WidthType.PERCENTAGE },
+            shading: { type: ShadingType.SOLID, color: 'F0F0F0' },
+            children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 20 })] })],
+          }),
+          new TableCell({
+            width: { size: 75, type: WidthType.PERCENTAGE },
+            children: [new Paragraph({ children: [new TextRun({ text: String(value || '—'), size: 20 })] })],
+          }),
+        ],
+      })
+    }
+
+    function sectionHeading(text) {
+      return new Paragraph({
+        text,
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 300, after: 120 },
+      })
+    }
+
+    function bddBlock(scenario) {
+      return scenario.split('\n').map(line =>
+        new Paragraph({
+          children: [new TextRun({ text: line, font: 'Courier New', size: 18, color: '1a7a4a' })],
+          shading: { type: ShadingType.SOLID, color: 'F0FFF8' },
+          spacing: { before: 0, after: 0 },
+        })
+      )
+    }
+
+    function evidenceBox() {
+      return [
+        new Paragraph({
+          children: [new TextRun({ text: 'Evidence', bold: true, size: 18, color: '888888' })],
+          spacing: { before: 120, after: 60 },
+        }),
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  width: { size: 100, type: WidthType.PERCENTAGE },
+                  children: [
+                    new Paragraph({ children: [new TextRun({ text: '', size: 20 })], spacing: { before: 400, after: 400 } }),
+                  ],
+                  borders: {
+                    top: { style: BorderStyle.DASHED, size: 1, color: 'CCCCCC' },
+                    bottom: { style: BorderStyle.DASHED, size: 1, color: 'CCCCCC' },
+                    left: { style: BorderStyle.DASHED, size: 1, color: 'CCCCCC' },
+                    right: { style: BorderStyle.DASHED, size: 1, color: 'CCCCCC' },
+                  },
+                  shading: { type: ShadingType.SOLID, color: 'FAFAFA' },
+                }),
+              ],
+            }),
+          ],
+        }),
+      ]
+    }
+
+    const casesSections = cases.flatMap((tc, i) => {
+      const rows = [
+        metaRow('Status', tc.status),
+        metaRow('Priority', tc.priority),
+      ]
+      if (tc.objective) rows.push(metaRow('Objective', tc.objective))
+      if (tc.precondition) rows.push(metaRow('Precondition', tc.precondition))
+      if (tc.assignee) rows.push(metaRow('Assignee', tc.assignee))
+      if (tc.productComponent) rows.push(metaRow('Product Component', tc.productComponent))
+      if (tc.squadTeam) rows.push(metaRow('Squad / Team', tc.squadTeam))
+      if (tc.regressionTests) rows.push(metaRow('Regression Tests?', tc.regressionTests))
+
+      return [
+        new Paragraph({
+          children: [new TextRun({ text: `${i + 1}. ${tc.name}`, bold: true, size: 22 })],
+          spacing: { before: 240, after: 80 },
+          shading: { type: ShadingType.SOLID, color: 'F5F5F5' },
+        }),
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows,
+        }),
+        ...(tc.scenario ? [
+          new Paragraph({ text: '', spacing: { before: 80, after: 0 } }),
+          ...bddBlock(tc.scenario),
+        ] : []),
+        new Paragraph({ text: '', spacing: { before: 80, after: 0 } }),
+        ...evidenceBox(),
+      ]
+    })
+
+    const doc = new Document({
+      sections: [{
+        children: [
+          new Paragraph({
+            text: `QA Report${issueInfo.issue ? ' — ' + issueInfo.issue : ''}`,
+            heading: HeadingLevel.HEADING_1,
+            spacing: { after: 200 },
+          }),
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+              metaRow('Issue', issueInfo.issue),
+              metaRow('Developer', issueInfo.dev),
+              metaRow('QA', issueInfo.qa),
+              metaRow('Date', date),
+            ],
+          }),
+
+          sectionHeading('QA Notes'),
+          ...(qaNotes.length === 0
+            ? [new Paragraph({ children: [new TextRun({ text: 'No notes.', color: '888888', size: 20 })] })]
+            : qaNotes.map(n => new Paragraph({ children: [new TextRun({ text: `• ${n}`, size: 20 })], spacing: { after: 60 } }))
+          ),
+
+          sectionHeading('Possible Impacts'),
+          ...((impacts || []).length === 0
+            ? [new Paragraph({ children: [new TextRun({ text: 'No impacts identified.', color: '888888', size: 20 })] })]
+            : impacts.map(n => new Paragraph({ children: [new TextRun({ text: `• ${n}`, size: 20 })], spacing: { after: 60 } }))
+          ),
+
+          sectionHeading(`Test Cases (${cases.length})`),
+          ...casesSections,
+
+          new Paragraph({
+            children: [new TextRun({ text: `Generated by QA Hub · ${date}`, color: 'BBBBBB', size: 18 })],
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 400 },
+          }),
+        ],
+      }],
+    })
+
+    const reportsDir = path.join(ROOT, 'reports')
+    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir)
+    const docxPath = path.join(reportsDir, `qa-report-${Date.now()}.docx`)
+    const buffer = await Packer.toBuffer(doc)
+    fs.writeFileSync(docxPath, buffer)
+    shell.showItemInFolder(docxPath)
+    shell.openPath(docxPath)
+    return { path: docxPath }
+  })
+
+  ipcMain.handle('export-pdf', async (_, { htmlPath }) => {
+    if (!htmlPath || !fs.existsSync(htmlPath)) return { error: 'Report file not found' }
+
+    const pdfPath = htmlPath.replace(/\.html$/, '.pdf')
+
+    const win = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: false } })
+    await win.loadURL('file://' + htmlPath)
+
+    // wait for content to fully render
+    await new Promise(resolve => setTimeout(resolve, 600))
+
+    const pdfBuffer = await win.webContents.printToPDF({
+      marginsType: 1,
+      pageSize: 'A4',
+      printBackground: true,
+      landscape: false,
+    })
+    win.destroy()
+
+    fs.writeFileSync(pdfPath, pdfBuffer)
+    shell.showItemInFolder(pdfPath)
+    return { path: pdfPath }
+  })
+
+module.exports = { register }

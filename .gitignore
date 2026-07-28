@@ -1,0 +1,12 @@
+target/
+.env
+*.class
+bin/
+test-cases.json
+reports/
+app/node_modules/
+.claude/settings.local.json
+.DS_Store
+feature-writer/features/
+feature-writer/default_file/
+.qa-hub-patterns.json
