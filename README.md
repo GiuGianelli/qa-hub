@@ -28,6 +28,7 @@ cp .env.example .env
 | `JIRA_BASE_URL` | Optional | Your Jira base URL (e.g. `https://company.atlassian.net`). Needed to link cycles to Jira issues. |
 | `JIRA_EMAIL` | Optional | Your Jira email. Needed together with `JIRA_BASE_URL`. |
 | `JIRA_API_TOKEN` | Optional | Generate at: id.atlassian.net → Security → API tokens. Used as fallback if Zephyr can't resolve the issue ID. |
+| `ANTHROPIC_AUTH_TOKEN` | Optional | Required for AI features. Your Anthropic API key or gateway token. |
 | `TEST_CASES_FILE` | Yes | JSON file path (default: `test-cases.json`) |
 | `REPOS_BASE_DIR` | Optional* | Path to your local repos folder. Used by Branch Analysis to read git diffs locally. |
 | `GITHUB_ORG` | Optional* | Your GitHub organization name (e.g. `YourOrg`). Used by Branch Analysis via GitHub MCP — no local repos needed. Requires `github` configured in `~/.claude/mcp.json`. |
@@ -83,7 +84,7 @@ The main workflow screen. Fill in the details for a QA session and export everyt
 1. Fill in Issue Info
 2. Add configuration notes, QA notes, and possible impacts
 3. In Test Cases, fill the form and click **ADD** for each test case
-   - Select a **Folder** by typing to search — the full path is shown (e.g. `API / Risk / RiskRules`)
+   - Select a **Folder** by typing to search — the full path is shown (e.g. `API / TEAM / Feature`)
    - Click **✎** to edit a case before importing
 4. Click **Import to Zephyr** to send all cases to Zephyr Scale
 5. After importing, click **Create Test Cycle** to create a cycle with all imported cases
