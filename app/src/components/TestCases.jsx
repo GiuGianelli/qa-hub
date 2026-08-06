@@ -314,7 +314,7 @@ const EMPTY_FORM = {
   preconditionImages: [],
   status: 'Approved', priority: 'High',
   productComponent: '', squadTeam: '', regressionTests: 'No',
-  testAutomation: 'No', testType: 'BDD',
+  testAutomation: 'No', testType: 'BDD', automationType: 'None',
   labels: '', scenario: '', folderId: '', assignee: ''
 }
 
@@ -429,9 +429,10 @@ function AddExistingModal({ onAdd, onClose }) {
       precondition: tc.precondition || '',
       productComponent: tc.productComponent || '',
       squadTeam: tc.squadTeam || '',
-      regressionTests: 'No',
-      testAutomation: 'No',
-      testType: 'BDD',
+      regressionTests: tc.regressionTests || 'No',
+      testAutomation: tc.testAutomation || 'No',
+      testType: tc.testType || 'BDD',
+      automationType: tc.automationType || 'None',
       labels: '',
       scenario: '',
       folderId: tc.folderId || '',
@@ -769,6 +770,18 @@ export default function TestCases({ cases, onChange, issueInfo, style }) {
             <option>BDD</option>
             <option>Positive</option>
             <option>Negative</option>
+          </select>
+        </div>
+        <div>
+          <label>Automation Type</label>
+          <select value={form.automationType} onChange={e => set('automationType', e.target.value)}>
+            <option>None</option>
+            <option>API</option>
+            <option>E2E</option>
+            <option>Integration (Mocked)</option>
+            <option>Performance</option>
+            <option>Unit Test</option>
+            <option>Acceptance Test (BluePrint)</option>
           </select>
         </div>
         <div>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 
-export default function Menu({ onStart, onManageCycle, onCreateTestCase, onAISession, onSavedSessions, onFeatureWriter, onMetrics }) {
+export default function Menu({ onStart, onManageCycle, onCreateTestCase, onAISession, onImportSession, onSavedSessions, onFeatureWriter, onMetrics, onCoverage }) {
   const [showTools, setShowTools] = useState(false)
 
   return (
@@ -10,6 +10,7 @@ export default function Menu({ onStart, onManageCycle, onCreateTestCase, onAISes
         <p>Your QA workflow tool</p>
       </div>
       <div className="menu-buttons">
+
         <div className="menu-option">
           <button className="menu-btn" onClick={onSavedSessions}>
             My Sessions
@@ -19,6 +20,14 @@ export default function Menu({ onStart, onManageCycle, onCreateTestCase, onAISes
         <div className="menu-option">
           <button className="menu-btn" onClick={onAISession}>
             New QA Session
+            <br />
+            <em style={{ fontSize: 11, fontWeight: 400, opacity: 0.7 }}>powered by AI</em>
+          </button>
+        </div>
+
+        <div className="menu-option">
+          <button className="menu-btn" onClick={onImportSession}>
+            Import QA Session
             <br />
             <em style={{ fontSize: 11, fontWeight: 400, opacity: 0.7 }}>powered by AI</em>
           </button>
@@ -76,6 +85,13 @@ export default function Menu({ onStart, onManageCycle, onCreateTestCase, onAISes
                 onClick={() => { setShowTools(false); onMetrics() }}
               >
                 Metrics
+              </button>
+              <button
+                className="menu-btn"
+                style={{ fontSize: 12, padding: '7px 14px', width: '100%', height: 'auto' }}
+                onClick={() => { setShowTools(false); onCoverage() }}
+              >
+                Coverage Analysis
               </button>
             </div>
           )}

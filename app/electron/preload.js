@@ -41,4 +41,10 @@ contextBridge.exposeInMainWorld('api', {
   createQaSubtask: (data) => ipcRenderer.invoke('create-qa-subtask', data),
   aiGenerateBug: (data) => ipcRenderer.invoke('ai-generate-bug', data),
   createJiraBug: (data) => ipcRenderer.invoke('create-jira-bug', data),
+  importQaReport: (data) => ipcRenderer.invoke('import-qa-report', data),
+  scanRepoKeys: () => ipcRenderer.invoke('scan-repo-keys'),
+  clearScanCache: () => ipcRenderer.invoke('clear-scan-cache'),
+  getFolderTestCases: (data) => ipcRenderer.invoke('get-folder-test-cases', data),
+  getZephyrFoldersForCoverage: () => ipcRenderer.invoke('get-zephyr-folders-for-coverage'),
+  listSkillTeams: () => ipcRenderer.invoke('list-skill-teams'),
 })

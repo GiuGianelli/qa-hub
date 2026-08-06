@@ -221,6 +221,8 @@ function LoadingProgress() {
 export default function AISessionScreen({ onBack, onUseSession }) {
   const [issueKey, setIssueKey] = useState('')
   const [useCodeContext, setUseCodeContext] = useState(true)
+  const [selectedTeams, setSelectedTeams] = useState([])
+  const [skillTeams, setSkillTeams] = useState([])
   const [createSubtask, setCreateSubtask] = useState(false)
   const [keywords, setKeywords] = useState([])
   const [keywordInput, setKeywordInput] = useState('')
@@ -229,12 +231,27 @@ export default function AISessionScreen({ onBack, onUseSession }) {
   const [error, setError] = useState('')
   const [generated, setGenerated] = useState(null)
 
+  function handleBack() {
+    if (generated && (qaNotes.length || impacts.length || cases.length)) {
+      if (!window.confirm('Are you sure you want to go back? The generated session will be lost.')) return
+    }
+    onBack()
+  }
+
   // editable fields after generation
   const [qaNotes, setQaNotes] = useState([])
   const [impacts, setImpacts] = useState([])
   const [cases, setCases] = useState([])
 
+  useEffect(() => {
+    window.api?.listSkillTeams().then(teams => setSkillTeams(teams || [])).catch(() => {})
+  }, [])
+
   const canGenerate = issueKey.trim() && !loading
+
+  function toggleTeam(team) {
+    setSelectedTeams(prev => prev.includes(team) ? prev.filter(t => t !== team) : [...prev, team])
+  }
 
   function addKeyword() {
     const kw = keywordInput.trim()
@@ -253,6 +270,7 @@ export default function AISessionScreen({ onBack, onUseSession }) {
       const res = await window.api?.aiGenerateSession({
         issueKey: issueKey.trim().toUpperCase(),
         useCodeContext,
+        skillTeams: selectedTeams,
         manualKeywords: keywords,
       })
       if (res?.error) {
@@ -325,18 +343,33 @@ export default function AISessionScreen({ onBack, onUseSession }) {
               {loading ? '...' : '✦ Generate'}
             </button>
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', userSelect: 'none' }}>
-            <input
-              type="checkbox"
-              checked={useCodeContext}
-              onChange={e => setUseCodeContext(e.target.checked)}
-              disabled={loading}
-              style={{ width: 13, height: 13, accentColor: '#3ecf8e', cursor: 'pointer' }}
-            />
-            <span style={{ fontSize: 11, color: useCodeContext ? '#3ecf8e' : '#4a5a7a' }}>
-              Use code as source of truth
-            </span>
-          </label>
+          {skillTeams.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <p style={{ fontSize: 11, color: '#4a5a7a', margin: '0 0 5px' }}>Skills context</p>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {skillTeams.map(team => {
+                  const active = selectedTeams.includes(team)
+                  return (
+                    <button
+                      key={team}
+                      onClick={() => toggleTeam(team)}
+                      disabled={loading}
+                      style={{
+                        fontSize: 11, padding: '2px 10px', borderRadius: 12,
+                        border: `1px solid ${active ? '#c87fff' : '#2a3a5a'}`,
+                        background: active ? '#c87fff22' : 'transparent',
+                        color: active ? '#c87fff' : '#4a5a7a',
+                        cursor: loading ? 'default' : 'pointer',
+                        fontWeight: active ? 700 : 400,
+                      }}
+                    >
+                      {team}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <div style={{ marginTop: 10 }}>
             <p style={{ fontSize: 11, color: '#4a5a7a', margin: '0 0 5px' }}>
               Keywords <span style={{ color: '#2a3a5a' }}>— optional, up to 3</span>
@@ -378,6 +411,19 @@ export default function AISessionScreen({ onBack, onUseSession }) {
           </div>
 
           <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', userSelect: 'none', marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={useCodeContext}
+              onChange={e => setUseCodeContext(e.target.checked)}
+              disabled={loading}
+              style={{ width: 13, height: 13, accentColor: '#3ecf8e', cursor: 'pointer' }}
+            />
+            <span style={{ fontSize: 11, color: useCodeContext ? '#3ecf8e' : '#4a5a7a' }}>
+              Use code as source of truth
+            </span>
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', userSelect: 'none', marginTop: 6 }}>
             <input
               type="checkbox"
               checked={createSubtask}
@@ -433,10 +479,13 @@ export default function AISessionScreen({ onBack, onUseSession }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
         {!generated ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 300 }}>
-            <svg viewBox="0 0 860 260" style={{ width: '100%', maxWidth: 960, opacity: 0.85 }} xmlns="http://www.w3.org/2000/svg">
+            <svg viewBox="0 0 980 260" style={{ width: '100%', maxWidth: 1080, opacity: 0.85 }} xmlns="http://www.w3.org/2000/svg">
               <defs>
                 <marker id="arr" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
                   <path d="M0,0 L0,7 L7,3.5 z" fill="#2a4a7a"/>
+                </marker>
+                <marker id="arrPurple" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                  <path d="M0,0 L0,7 L7,3.5 z" fill="#c87fff88"/>
                 </marker>
               </defs>
 
@@ -498,6 +547,12 @@ export default function AISessionScreen({ onBack, onUseSession }) {
               <text x="721" y="160" textAnchor="middle" fill="#4a5a7a" fontSize="9" fontFamily="monospace">keywords</text>
               <text x="721" y="176" textAnchor="middle" fill="#4a5a7a" fontSize="9" fontFamily="monospace">generates plan</text>
 
+              {/* ── SKILLS (optional, feeds into Claude AI) ── */}
+              <rect x="656" y="208" width="130" height="44" rx="6" fill="#1a0f2a" stroke="#c87fff55" strokeWidth="1.5"/>
+              <text x="721" y="225" textAnchor="middle" fill="#c87fff" fontSize="10" fontWeight="700" fontFamily="monospace">SKILLS</text>
+              <text x="721" y="240" textAnchor="middle" fill="#7a5a9a" fontSize="8" fontFamily="monospace">optional team context</text>
+              <line x1="721" y1="208" x2="721" y2="196" stroke="#c87fff66" strokeWidth="1.5" strokeDasharray="4,3" markerEnd="url(#arrPurple)"/>
+
               {/* lines from claude to outputs */}
               <line x1="786" y1="105" x2="806" y2="91" stroke="#1a3a5a" strokeWidth="1" strokeDasharray="4,2" markerEnd="url(#arr)"/>
               <line x1="786" y1="130" x2="806" y2="130" stroke="#1a3a5a" strokeWidth="1" strokeDasharray="4,2" markerEnd="url(#arr)"/>
@@ -515,6 +570,19 @@ export default function AISessionScreen({ onBack, onUseSession }) {
               <rect x="806" y="156" width="48" height="46" rx="5" fill="#0f2040" stroke="#e8c07f66" strokeWidth="1.5"/>
               <text x="830" y="177" textAnchor="middle" fill="#e8c07f" fontSize="10" fontWeight="700" fontFamily="monospace">BDD</text>
               <text x="830" y="191" textAnchor="middle" fill="#e8c07f" fontSize="10" fontWeight="700" fontFamily="monospace">Cases</text>
+
+              {/* arrow from outputs column to next box */}
+              <line x1="854" y1="130" x2="874" y2="130" stroke="#2a4a7a" strokeWidth="1.5" markerEnd="url(#arr)"/>
+
+              {/* ── ZEPHYR / CYCLE ── */}
+              <rect x="874" y="70" width="96" height="120" rx="7" fill="#0f1a30" stroke="#7fb3e844" strokeWidth="1.5"/>
+              <text x="922" y="93" textAnchor="middle" fill="#7fb3e8" fontSize="10" fontWeight="700" fontFamily="monospace">ZEPHYR</text>
+              <line x1="884" y1="99" x2="960" y2="99" stroke="#7fb3e822" strokeWidth="1"/>
+              <text x="922" y="115" textAnchor="middle" fill="#4a6a8a" fontSize="9" fontFamily="monospace">import to</text>
+              <text x="922" y="128" textAnchor="middle" fill="#4a6a8a" fontSize="9" fontFamily="monospace">Zephyr</text>
+              <text x="922" y="145" textAnchor="middle" fill="#4a6a8a" fontSize="9" fontFamily="monospace">create cycle</text>
+              <text x="922" y="158" textAnchor="middle" fill="#4a6a8a" fontSize="9" fontFamily="monospace">&amp; link to</text>
+              <text x="922" y="171" textAnchor="middle" fill="#4a6a8a" fontSize="9" fontFamily="monospace">Jira story</text>
             </svg>
           </div>
         ) : (
@@ -532,7 +600,7 @@ export default function AISessionScreen({ onBack, onUseSession }) {
 
       {/* Footer */}
       <div style={{ padding: '10px 16px', borderTop: '1px solid #0f3460', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-        <button className="secondary" onClick={onBack}>← Menu</button>
+        <button className="secondary" onClick={handleBack}>← Menu</button>
         {generated && (
           <button
             onClick={() => onUseSession({
@@ -541,6 +609,7 @@ export default function AISessionScreen({ onBack, onUseSession }) {
               qaNotes,
               impacts,
               cases,
+              skillTeam: selectedTeams.length > 0 ? selectedTeams : null,
             })}
           >
             Use This Session →

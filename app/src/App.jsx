@@ -6,6 +6,8 @@ import QaNotes from './components/QaNotes'
 import PossibleImpacts from './components/PossibleImpacts'
 import TestCases from './components/TestCases'
 import AISessionScreen from './components/AISessionScreen'
+import ImportSessionScreen from './components/ImportSessionScreen'
+import CoverageScreen from './components/CoverageScreen'
 import SavedSessionsScreen from './components/SavedSessionsScreen'
 import FeatureWriterScreen from './components/FeatureWriterScreen'
 import MetricsScreen from './components/MetricsScreen'
@@ -970,7 +972,10 @@ export default function App() {
   const [sessionSaved, setSessionSaved] = useState(false)
   const [currentSessionId, setCurrentSessionId] = useState(null)
   const [lastSavedAt, setLastSavedAt] = useState(null)
+  const [sessionSource, setSessionSource] = useState(null)
+  const [sessionSkillTeam, setSessionSkillTeam] = useState(null)
   const sessionSavedRef = useRef(false)
+
   const importOutputRef = useRef(null)
 
   // Reset "Saved" state whenever anything meaningful changes after a save
@@ -980,6 +985,7 @@ export default function App() {
       sessionSavedRef.current = false
     }
   }, [issueInfo, configNotes, qaNotes, impacts, cases, importedKeys, cycleReady, reportDone])
+
 
   useEffect(() => {
     if (importOutputRef.current) importOutputRef.current.scrollTop = importOutputRef.current.scrollHeight
@@ -1005,6 +1011,8 @@ export default function App() {
     setImportOutput('')
     setCurrentSessionId(null)
     setLastSavedAt(null)
+    setSessionSource(null)
+    setSessionSkillTeam(null)
     setScreen('menu')
   }
 
@@ -1032,6 +1040,8 @@ export default function App() {
       const session = {
         id: currentSessionId,
         savedAt: now,
+        ...(sessionSource ? { source: sessionSource } : {}),
+        ...(sessionSkillTeam ? { skillTeam: sessionSkillTeam } : {}),
         issueInfo, configNotes, qaNotes, impacts, cases,
         importedKeys,
         cycleReady,
@@ -1043,6 +1053,7 @@ export default function App() {
       const session = {
         id: newId,
         savedAt: now,
+        ...(sessionSkillTeam ? { skillTeam: sessionSkillTeam } : {}),
         issueInfo, configNotes, qaNotes, impacts, cases,
         importedKeys,
         cycleReady,
@@ -1103,9 +1114,11 @@ export default function App() {
         onManageCycle={() => setScreen('manage-cycle')}
         onCreateTestCase={() => setScreen('create-test-case')}
         onAISession={() => setScreen('ai-session')}
+        onImportSession={() => setScreen('import-session')}
         onSavedSessions={() => setScreen('saved-sessions')}
         onFeatureWriter={() => setScreen('feature-writer')}
         onMetrics={() => setScreen('metrics')}
+        onCoverage={() => setScreen('coverage')}
       />
     )
   }
@@ -1131,6 +1144,8 @@ export default function App() {
           setReportDone(step >= 4 && !hasFailedCases)
           setCurrentSessionId(session.id)
           setLastSavedAt(session.savedAt || null)
+          setSessionSource(session.source || null)
+          setSessionSkillTeam(session.skillTeam || null)
           setSessionSaved(false)
           setScreen('workspace')
         }}
@@ -1165,6 +1180,24 @@ export default function App() {
           setQaNotes(sessionData.qaNotes)
           setImpacts(sessionData.impacts)
           setCases(sessionData.cases)
+          if (sessionData.skillTeam) setSessionSkillTeam(sessionData.skillTeam)
+          setScreen('workspace')
+        }}
+      />
+    )
+  }
+
+  if (screen === 'import-session') {
+    return (
+      <ImportSessionScreen
+        onBack={goToMenu}
+        onImport={(sessionData) => {
+          setIssueInfo(sessionData.issueInfo)
+          setConfigNotes(sessionData.configNotes)
+          setQaNotes(sessionData.qaNotes)
+          setImpacts(sessionData.impacts)
+          setCases(sessionData.cases)
+          setSessionSource('imported')
           setScreen('workspace')
         }}
       />
@@ -1173,6 +1206,10 @@ export default function App() {
 
   if (screen === 'feature-writer') {
     return <FeatureWriterScreen onBack={goToMenu} />
+  }
+
+  if (screen === 'coverage') {
+    return <CoverageScreen onBack={goToMenu} />
   }
 
   if (screen === 'metrics') {
@@ -1326,7 +1363,7 @@ return (
                 <button onClick={generateReport}>Generate Report</button>
               </>
             ) : (
-              /* Phase 3 done: report generated & auto-saved */
+              /* Phase 3 done: report generated */
               <>
                 <span style={{ fontSize: 11, color: '#3ecf8e', fontWeight: 600, whiteSpace: 'nowrap' }}>
                   ✓ Report generated &amp; saved

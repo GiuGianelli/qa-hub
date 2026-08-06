@@ -299,6 +299,14 @@ function register() {
       })
     })
   })
+
+  ipcMain.handle('list-skill-teams', () => {
+    const skillsDir = path.join(ROOT, 'skills')
+    if (!fs.existsSync(skillsDir)) return []
+    return fs.readdirSync(skillsDir).filter(name =>
+      fs.statSync(path.join(skillsDir, name)).isDirectory()
+    )
+  })
 }
 
 module.exports = { register }

@@ -1,6 +1,7 @@
 const { ipcMain } = require('electron')
 const https = require('node:https')
-const { loadEnv } = require('../lib/env')
+const fs = require('node:fs')
+const { loadEnv, ROOT } = require('../lib/env')
 const { runClaude } = require('../lib/claude')
 const { fetchConfluencePage } = require('../lib/confluence')
 const { extractKeywords, findRelevantCode, expandToServiceRoots, learnFromDiff } = require('../lib/codeSearch')
@@ -102,8 +103,55 @@ function getRepoDiff(root, branch, reposBaseDir) {
   return { repoName, changedFiles: allFiles, testFiles, prodFiles, testDiff: gitDiff(testFiles), prodDiff: gitDiff(prodFiles).slice(0, 12000) }
 }
 
+function loadTeamSkills(teamName) {
+  const teamDir = path.join(ROOT, 'skills', teamName)
+  if (!fs.existsSync(teamDir)) {
+    console.log(`[ai-generate] skills/${teamName} not found`)
+    return ''
+  }
+  const files = fs.readdirSync(teamDir).filter(f => f.endsWith('.md'))
+  let combined = ''
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(teamDir, file), 'utf-8')
+    combined += `\n\n### ${file}\n${text}`
+    if (combined.length >= 8000) break
+  }
+  const content = combined.slice(0, 8000).trim()
+  console.log(`[ai-generate] loaded team skills: ${teamName} (${content.length} chars, ${files.length} files)`)
+  return content
+}
+
+async function loadBddStandards(confluenceBddPageId, jiraBaseUrl, jiraEmail, jiraApiToken) {
+  if (!confluenceBddPageId || !jiraBaseUrl || !jiraEmail || !jiraApiToken) return ''
+  try {
+    const standards = await fetchConfluencePage(confluenceBddPageId, jiraBaseUrl, jiraEmail, jiraApiToken)
+    console.log(`[ai-generate] loaded BDD standards (${standards.length} chars)`)
+    return standards
+  } catch (e) {
+    console.log(`[ai-generate] could not fetch Confluence BDD page: ${e.message}`)
+    return ''
+  }
+}
+
+function buildBddIdentity(bddStandards) {
+  if (bddStandards) {
+    return `You are a BDD specialist and QA engineer. Your Gherkin scenarios must strictly follow the team's standards documented below — treat this as your source of truth for scenario structure, language, naming, and formatting.\n\nTEAM BDD STANDARDS:\n${bddStandards}\n\nApply these standards to every scenario you write. Do not deviate from the conventions above.`
+  }
+  return `You are a BDD specialist and QA engineer. Write Gherkin scenarios following best practices: clear Given/When/Then structure, one behaviour per scenario, declarative style, no UI implementation details in steps.`
+}
+
+function mergeKeywords(manual, auto) {
+  if (manual.length) return [...new Set([...manual, ...auto])]
+  return auto
+}
+
+async function fetchCodeContext(useCodeContext, keywords, reposBaseDir, components) {
+  if (!useCodeContext || !reposBaseDir) return ''
+  return findRelevantCode(keywords, reposBaseDir, { components })
+}
+
 function register() {
-  ipcMain.handle('ai-generate-session', async (_, { issueKey, useCodeContext = true, manualKeywords = [] }) => {
+  ipcMain.handle('ai-generate-session', async (_, { issueKey, useCodeContext = true, skillTeams = [], manualKeywords = [] }) => {
     const { jiraBaseUrl, jiraEmail, jiraApiToken, anthropicKey, anthropicBaseUrl, confluenceBddPageId, reposBaseDir } = loadEnv()
 
     if (!anthropicKey) return { error: 'ANTHROPIC_AUTH_TOKEN not set in environment' }
@@ -128,34 +176,29 @@ function register() {
     const status = fields.status?.name || ''
     const description = adfToText(fields.description).slice(0, 3000)
 
-    let bddStandards = ''
-    if (confluenceBddPageId && jiraBaseUrl && jiraEmail && jiraApiToken) {
-      try {
-        bddStandards = await fetchConfluencePage(confluenceBddPageId, jiraBaseUrl, jiraEmail, jiraApiToken)
-        console.log(`[ai-generate] loaded BDD standards (${bddStandards.length} chars)`)
-      } catch (e) {
-        console.log(`[ai-generate] could not fetch Confluence BDD page: ${e.message}`)
-      }
-    }
-
-    const bddExpertIdentity = bddStandards
-      ? `You are a BDD specialist and QA engineer. Your Gherkin scenarios must strictly follow the team's standards documented below — treat this as your source of truth for scenario structure, language, naming, and formatting.\n\nTEAM BDD STANDARDS:\n${bddStandards}\n\nApply these standards to every scenario you write. Do not deviate from the conventions above.`
-      : `You are a BDD specialist and QA engineer. Write Gherkin scenarios following best practices: clear Given/When/Then structure, one behaviour per scenario, declarative style, no UI implementation details in steps.`
+    const bddStandards = await loadBddStandards(confluenceBddPageId, jiraBaseUrl, jiraEmail, jiraApiToken)
+    const bddExpertIdentity = buildBddIdentity(bddStandards)
 
     const issueSection = `Issue: ${issueKey}\nType: ${issueType}\nPriority: ${priority}\nStatus: ${status}\nLabels: ${labels.join(', ') || 'none'}\nComponents: ${components.join(', ') || 'none'}\nSummary: ${summary}\nDescription:\n${description || '(no description)'}`
 
     const autoKeywords = extractKeywords([summary, description].join(' '), { components, labels })
-    const keywords = manualKeywords.length ? [...new Set([...manualKeywords, ...autoKeywords])] : autoKeywords
-    const codeContext = useCodeContext && reposBaseDir ? await findRelevantCode(keywords, reposBaseDir, { components }) : ''
+    const keywords = mergeKeywords(manualKeywords, autoKeywords)
+    const codeContext = await fetchCodeContext(useCodeContext, keywords, reposBaseDir, components)
     const codeSection = codeContext
       ? `RELEVANT SOURCE CODE (from local repositories — use this as ground truth for the implementation):\n\`\`\`\n${codeContext}\n\`\`\``
+      : ''
+
+    const teams = (Array.isArray(skillTeams) ? skillTeams : [skillTeams]).filter(Boolean)
+    const skillsContent = teams.map(t => loadTeamSkills(t)).filter(Boolean).join('\n\n')
+    const skillsSection = skillsContent
+      ? `TEAM SKILLS CONTEXT (${teams.join(', ')} — use this to guide your risk assessment and test case focus):\n${skillsContent}`
       : ''
 
     const prompt = `${bddExpertIdentity}
 
 Based on the information below, generate a structured QA session plan.
 
-${issueSection}${codeSection ? '\n\n' + codeSection : ''}
+${issueSection}${skillsSection ? '\n\n' + skillsSection : ''}${codeSection ? '\n\n' + codeSection : ''}
 
 Return a JSON object with this exact structure (no markdown, just raw JSON):
 {
@@ -324,6 +367,61 @@ Rules:
     try {
       const text = await runClaude(prompt, { anthropicKey, anthropicBaseUrl })
       return { success: true, text }
+    } catch (e) {
+      return { error: `Claude API error: ${e.message}` }
+    }
+  })
+
+  ipcMain.handle('import-qa-report', async (_, { reportText }) => {
+    const { anthropicKey, anthropicBaseUrl } = loadEnv()
+    if (!anthropicKey) return { error: 'ANTHROPIC_AUTH_TOKEN not set in environment' }
+    if (!reportText?.trim()) return { error: 'Report text is required' }
+
+    const prompt = `You are a QA data extractor. The user will paste the output of a QA report, skill output, or any document describing a software change and its test plan.
+
+Your job is to extract structured QA session data from it and return a JSON object.
+
+REPORT:
+${reportText.slice(0, 12000)}
+
+Return a JSON object with this exact structure (no markdown, just raw JSON):
+{
+  "issueInfo": {
+    "issue": "Jira issue key or URL if found, otherwise empty string",
+    "dev": "developer name if mentioned, otherwise empty string",
+    "qa": "QA engineer name if mentioned, otherwise empty string"
+  },
+  "qaNotes": ["string", "string"],
+  "impacts": ["string", "string"],
+  "cases": [
+    {
+      "name": "short descriptive name for the test case",
+      "status": "Draft",
+      "priority": "Normal",
+      "objective": "one sentence describing what this test validates",
+      "precondition": "what must be true before running this test, or empty string",
+      "scenario": "Given ...\\nWhen ...\\nThen ... (BDD format if possible, otherwise a plain description)",
+      "productComponent": "",
+      "squadTeam": "",
+      "regressionTests": "No"
+    }
+  ]
+}
+
+Rules:
+- qaNotes: extract risks, acceptance criteria, important observations — 3–8 items
+- impacts: extract areas of the system that could be affected — 3–6 items
+- cases: extract every test case, test scenario, or test idea mentioned — be thorough
+- If the report already has BDD Gherkin scenarios, preserve them exactly in the scenario field
+- If no test cases are explicitly listed, infer them from the acceptance criteria and described behaviors
+- priority: use "High" or "Critical" if the report marks something as high risk, otherwise "Normal"
+- All text in English`
+
+    try {
+      const text = await runClaude(prompt, { anthropicKey, anthropicBaseUrl })
+      const result = parseJson(text)
+      if (!result) return { error: `Could not parse AI response. Raw output: ${text.slice(0, 300)}` }
+      return { success: true, result }
     } catch (e) {
       return { error: `Claude API error: ${e.message}` }
     }

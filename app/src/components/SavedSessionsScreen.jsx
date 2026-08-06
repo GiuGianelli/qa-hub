@@ -10,6 +10,12 @@ function resolveStep(workflowStep) {
   return workflowStep ?? 1
 }
 
+function toSkillTeamsArray(skillTeam) {
+  if (Array.isArray(skillTeam)) return skillTeam
+  if (skillTeam) return [skillTeam]
+  return []
+}
+
 const STEPS = [
   { n: 1, label: 'Import' },
   { n: 2, label: 'Test Cycle' },
@@ -122,6 +128,63 @@ function renderCoverageGaps(gaps, dismissedGaps, setDismissedGaps, setSaved) {
   )
 }
 
+function MissingItem({ item, validated, na, onCycle }) {
+  let checkBg = 'transparent'
+  let checkBorder = '#4a5a7a'
+  let rowBg = 'transparent'
+  let textColor = '#7f8fb5'
+  let checkMark = ''
+  let badge = null
+
+  if (validated) {
+    checkBg = '#3ecf8e'
+    checkBorder = '#3ecf8e'
+    rowBg = '#3ecf8e11'
+    textColor = '#3ecf8e'
+    checkMark = '✓'
+    badge = <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: '#3ecf8e', opacity: 0.8 }}>Manually validated</span>
+  } else if (na) {
+    checkBg = '#7f8fb5'
+    checkBorder = '#7f8fb5'
+    rowBg = '#ffffff08'
+    textColor = '#4a5a7a'
+    checkMark = '—'
+    badge = <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: '#7f8fb5', opacity: 0.8 }}>Not applicable</span>
+  }
+
+  return (
+    <button
+      onClick={() => onCycle(item)}
+      title="Click to cycle: unchecked → Manually Validated → Not Applicable"
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 8,
+        padding: '4px 6px', borderRadius: 4, marginBottom: 2,
+        cursor: 'pointer', width: '100%', textAlign: 'left',
+        background: rowBg, border: 'none',
+      }}
+    >
+      <div style={{
+        flexShrink: 0, marginTop: 1,
+        width: 14, height: 14, borderRadius: 3,
+        border: `1.5px solid ${checkBorder}`,
+        background: checkBg,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 9, color: '#0f1e3a', fontWeight: 900,
+        transition: 'all 0.15s',
+      }}>
+        {checkMark}
+      </div>
+      <span style={{
+        fontSize: 11, color: textColor,
+        textDecoration: validated || na ? 'line-through' : 'none',
+        lineHeight: 1.4,
+      }}>
+        {item}{badge}
+      </span>
+    </button>
+  )
+}
+
 function BranchAnalysisPanel({ session, onClose, onSessionSaved }) {
   const prior = session.branchAnalysis
   const [branch, setBranch] = useState(prior?.branch || '')
@@ -131,15 +194,21 @@ function BranchAnalysisPanel({ session, onClose, onSessionSaved }) {
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(!!prior)
   const [manuallyValidated, setManuallyValidated] = useState(() => new Set(prior?.manuallyValidated || []))
+  const [notApplicable, setNotApplicable] = useState(() => new Set(prior?.notApplicable || []))
   const [dismissedGaps, setDismissedGaps] = useState(() => new Set(prior?.dismissedGaps || []))
   const inputRef = useRef(null)
 
-  function toggleManuallyValidated(item) {
-    setManuallyValidated(prev => {
-      const next = new Set(prev)
-      next.has(item) ? next.delete(item) : next.add(item)
-      return next
-    })
+  function cycleItemState(item) {
+    const isValidated = manuallyValidated.has(item)
+    const isNA = notApplicable.has(item)
+    if (!isValidated && !isNA) {
+      setManuallyValidated(prev => { const n = new Set(prev); n.add(item); return n })
+    } else if (isValidated) {
+      setManuallyValidated(prev => { const n = new Set(prev); n.delete(item); return n })
+      setNotApplicable(prev => { const n = new Set(prev); n.add(item); return n })
+    } else {
+      setNotApplicable(prev => { const n = new Set(prev); n.delete(item); return n })
+    }
     setSaved(false)
   }
 
@@ -159,7 +228,7 @@ function BranchAnalysisPanel({ session, onClose, onSessionSaved }) {
   }
 
   async function saveAnalysis() {
-    const updated = { ...session, branchAnalysis: { branch: branch.trim(), prDescription, result, manuallyValidated: [...manuallyValidated], dismissedGaps: [...dismissedGaps], savedAt: new Date().toISOString() } }
+    const updated = { ...session, branchAnalysis: { branch: branch.trim(), prDescription, result, manuallyValidated: [...manuallyValidated], notApplicable: [...notApplicable], dismissedGaps: [...dismissedGaps], savedAt: new Date().toISOString() } }
     await window.api?.updateSession(updated)
     setSaved(true)
     onSessionSaved(updated)
@@ -311,47 +380,18 @@ function BranchAnalysisPanel({ session, onClose, onSessionSaved }) {
               )}
               {result.adherence.missing?.length > 0 && (
                 <div>
-                  <p style={{ fontSize: 10, color: '#e94560', fontWeight: 700, margin: '0 0 6px' }}>Missing / Not tested</p>
+                  {(() => {
+                    const unresolved = result.adherence.missing.filter(item => !notApplicable.has(item))
+                    return (
+                      <p style={{ fontSize: 10, color: '#e94560', fontWeight: 700, margin: '0 0 6px' }}>
+                        Missing / Not tested{unresolved.length < result.adherence.missing.length ? ` (${unresolved.length} remaining)` : ''}
+                      </p>
+                    )
+                  })()}
                   {result.adherence.missing.map((item) => {
                     const validated = manuallyValidated.has(item)
-                    return (
-                      <button
-                        key={item}
-                        onClick={() => toggleManuallyValidated(item)}
-                        style={{
-                          display: 'flex', alignItems: 'flex-start', gap: 8,
-                          padding: '4px 6px', borderRadius: 4, marginBottom: 2,
-                          cursor: 'pointer', width: '100%', textAlign: 'left',
-                          background: validated ? '#3ecf8e11' : 'transparent',
-                          border: 'none',
-                        }}
-                      >
-                        <div style={{
-                          flexShrink: 0, marginTop: 1,
-                          width: 14, height: 14, borderRadius: 3,
-                          border: `1.5px solid ${validated ? '#3ecf8e' : '#4a5a7a'}`,
-                          background: validated ? '#3ecf8e' : 'transparent',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 9, color: '#0f1e3a', fontWeight: 900,
-                          transition: 'all 0.15s',
-                        }}>
-                          {validated ? '✓' : ''}
-                        </div>
-                        <span style={{
-                          fontSize: 11,
-                          color: validated ? '#3ecf8e' : '#7f8fb5',
-                          textDecoration: validated ? 'line-through' : 'none',
-                          lineHeight: 1.4,
-                        }}>
-                          {item}
-                          {validated && (
-                            <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: '#3ecf8e', opacity: 0.8 }}>
-                              Manually validated
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    )
+                    const na = notApplicable.has(item)
+                    return <MissingItem key={item} item={item} validated={validated} na={na} onCycle={cycleItemState} />
                   })}
                 </div>
               )}
@@ -369,8 +409,10 @@ export default function SavedSessionsScreen({ onBack, onLoadSession, onGenerateR
   const [analyzingId, setAnalyzingId] = useState(null)
   const [exportingId, setExportingId] = useState(null)
   const [exportingDocxId, setExportingDocxId] = useState(null)
+  const [exportingPdfId, setExportingPdfId] = useState(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [activeTab, setActiveTab] = useState('working')
+  const [search, setSearch] = useState('')
 
   async function previewReport(s) {
     if (exportingId) return
@@ -398,6 +440,22 @@ export default function SavedSessionsScreen({ onBack, onLoadSession, onGenerateR
     setExportingDocxId(null)
   }
 
+  async function exportPdf(s) {
+    if (exportingPdfId) return
+    setExportingPdfId(s.id)
+    const res = await window.api?.generateReport({
+      issueInfo: s.issueInfo,
+      configNotes: s.configNotes,
+      qaNotes: s.qaNotes,
+      impacts: s.impacts,
+      cases: s.cases,
+    })
+    if (res?.path) {
+      await window.api?.exportPdf({ htmlPath: res.path })
+    }
+    setExportingPdfId(null)
+  }
+
   useEffect(() => {
     window.api?.loadSessions().then(s => { setSessions(s || []); setLoading(false) })
   }, [])
@@ -419,15 +477,27 @@ export default function SavedSessionsScreen({ onBack, onLoadSession, onGenerateR
     setSessions(prev => prev.map(x => x.id === updated.id ? updated : x))
   }
 
+  const searchLower = search.trim().toLowerCase()
   const workingSessions = sessions.filter(s => !s.merged)
   const mergedSessions = sessions.filter(s => s.merged)
-  const visibleSessions = activeTab === 'working' ? workingSessions : mergedSessions
+  const tabSessions = activeTab === 'working' ? workingSessions : mergedSessions
+  const visibleSessions = searchLower
+    ? tabSessions.filter(s => (s.issueInfo?.issue || '').toLowerCase().includes(searchLower) || (s.issueInfo?.dev || '').toLowerCase().includes(searchLower) || (s.issueInfo?.qa || '').toLowerCase().includes(searchLower))
+    : tabSessions
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={{ padding: '16px 20px 0', borderBottom: '1px solid #0f3460', flexShrink: 0 }}>
-        <h1 style={{ fontSize: 16, fontWeight: 700, color: '#e0e0e0', margin: 0 }}>My Sessions</h1>
-        <p style={{ fontSize: 11, color: '#7f8fb5', marginTop: 4, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+          <h1 style={{ fontSize: 16, fontWeight: 700, color: '#e0e0e0', margin: 0, flex: 1 }}>My Sessions</h1>
+          <input
+            placeholder="Search by issue, dev or QA..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ width: 220, marginBottom: 0, fontSize: 11, padding: '4px 8px' }}
+          />
+        </div>
+        <p style={{ fontSize: 11, color: '#7f8fb5', marginTop: 0, marginBottom: 12 }}>
           {sessions.length} session{sessions.length === 1 ? '' : 's'} saved locally
         </p>
         <div style={{ display: 'flex', gap: 0 }}>
@@ -476,39 +546,78 @@ export default function SavedSessionsScreen({ onBack, onLoadSession, onGenerateR
             background: '#16213e', border: '1px solid #0f3460', borderRadius: 6,
             padding: '12px 16px', marginBottom: 10,
           }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#e94560', fontFamily: 'monospace' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {/* LEFT: issue info */}
+              <div style={{ width: 300, flexShrink: 0, minWidth: 0 }}>
+                {/* Row 1: issue key + badge — never wraps */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, flexWrap: 'nowrap', overflow: 'hidden' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#e94560', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                     {s.issueInfo?.issue || '—'}
                   </span>
-                  {s.issueInfo?.dev && (
-                    <span style={{ fontSize: 11, color: '#7f8fb5' }}>dev: {s.issueInfo.dev}</span>
+                  {s.source === 'imported' && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 10,
+                      background: '#a78bfa22', color: '#a78bfa',
+                      border: '1px solid #a78bfa55', letterSpacing: '0.06em',
+                      textTransform: 'uppercase', flexShrink: 0,
+                    }}>
+                      ↓ imported
+                    </span>
                   )}
-                  {s.issueInfo?.qa && (
-                    <span style={{ fontSize: 11, color: '#7f8fb5' }}>qa: {s.issueInfo.qa}</span>
-                  )}
+                  {toSkillTeamsArray(s.skillTeam).map(team => (
+                    <span key={team} style={{
+                      fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 10,
+                      background: '#c87fff22', color: '#c87fff',
+                      border: '1px solid #c87fff55', letterSpacing: '0.06em',
+                      textTransform: 'uppercase', flexShrink: 0,
+                    }}>
+                      ⚡ {team}
+                    </span>
+                  ))}
                 </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#4a5a7a', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span>{formatDate(s.savedAt)}</span>
-                  <span>{s.cases?.length ?? 0} test case{s.cases?.length === 1 ? '' : 's'}</span>
-                  <span>{s.qaNotes?.length ?? 0} QA note{s.qaNotes?.length === 1 ? '' : 's'}</span>
-                  {s.branchAnalysis && (
+                {/* Row 2: dev / qa — separate line, truncates if long */}
+                {(s.issueInfo?.dev || s.issueInfo?.qa) && (
+                  <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#7f8fb5', marginBottom: 2, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    {s.issueInfo?.dev && (
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>dev: {s.issueInfo.dev}</span>
+                    )}
+                    {s.issueInfo?.qa && (
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>qa: {s.issueInfo.qa}</span>
+                    )}
+                  </div>
+                )}
+                {/* Row 3: date · counts */}
+                <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#4a5a7a', flexWrap: 'nowrap', overflow: 'hidden', alignItems: 'center' }}>
+                  <span style={{ whiteSpace: 'nowrap' }}>{formatDate(s.savedAt)}</span>
+                  <span style={{ whiteSpace: 'nowrap' }}>{s.cases?.length ?? 0} test case{s.cases?.length === 1 ? '' : 's'}</span>
+                  <span style={{ whiteSpace: 'nowrap' }}>{s.qaNotes?.length ?? 0} QA note{s.qaNotes?.length === 1 ? '' : 's'}</span>
+                </div>
+                {/* Row 4: branch (only when present) */}
+                {s.branchAnalysis && (
+                  <div style={{ marginTop: 3 }}>
                     <button
                       onClick={() => setAnalyzingId(prev => prev === s.id ? null : s.id)}
                       style={{
                         fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10,
                         background: analyzingId === s.id ? '#7fb3e844' : '#7fb3e822',
                         color: '#7fb3e8', border: '1px solid #7fb3e844',
-                        cursor: 'pointer',
+                        cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden',
+                        textOverflow: 'ellipsis', maxWidth: 280, display: 'block',
                       }}
-                      title="View branch analysis"
+                      title={s.branchAnalysis.branch}
                     >
                       ⎇ {s.branchAnalysis.branch}
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
+
+              {/* MIDDLE: stepper */}
+              <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                <MiniStepper step={resolveStep(s.workflowStep)} />
+              </div>
+
+              {/* RIGHT: buttons */}
               <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                 <button
                   className="secondary"
@@ -532,6 +641,14 @@ export default function SavedSessionsScreen({ onBack, onLoadSession, onGenerateR
                   onClick={() => exportDocx(s)}
                 >
                   {exportingDocxId === s.id ? 'Exporting...' : '↓ DOCX'}
+                </button>
+                <button
+                  className="secondary"
+                  style={{ fontSize: 11, padding: '4px 12px', color: '#e94560', borderColor: '#4a1a1a' }}
+                  disabled={exportingPdfId === s.id}
+                  onClick={() => exportPdf(s)}
+                >
+                  {exportingPdfId === s.id ? 'Exporting...' : '↓ PDF'}
                 </button>
                 <button
                   className="secondary"
@@ -580,7 +697,6 @@ export default function SavedSessionsScreen({ onBack, onLoadSession, onGenerateR
                 )}
               </div>
             </div>
-            <MiniStepper step={resolveStep(s.workflowStep)} />
             {analyzingId === s.id && (
               <BranchAnalysisPanel
                 session={s}

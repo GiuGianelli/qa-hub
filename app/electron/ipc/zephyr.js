@@ -48,9 +48,23 @@ function register() {
         executions = (Array.isArray(execs.values) ? execs.values : []).map(e => ({
           id: e.id,
           testCaseKey: tcKeyFromSelf(e.testCase && e.testCase.self),
-          testCaseName: '',
+          testCaseName: e.testCase?.name || '',
           status: (e.testExecutionStatus && statusMap[e.testExecutionStatus.id]) || '',
         }))
+
+        // Fetch names for any executions where the API didn't return them inline
+        const missing = executions.filter(e => e.testCaseKey && !e.testCaseName)
+        if (missing.length) {
+          const names = await Promise.all(
+            missing.map(e =>
+              zephyrRequest('GET', `/testcases/${encodeURIComponent(e.testCaseKey)}`, token)
+                .then(tc => ({ key: e.testCaseKey, name: tc.name || '' }))
+                .catch(() => ({ key: e.testCaseKey, name: '' }))
+            )
+          )
+          const nameMap = Object.fromEntries(names.map(n => [n.key, n.name]))
+          executions = executions.map(e => e.testCaseName ? e : { ...e, testCaseName: nameMap[e.testCaseKey] || '' })
+        }
       } catch (e) { console.log('[get-cycle] execs error:', e.message) }
 
       return {

@@ -39,6 +39,7 @@ function register() {
             ${tc.productComponent ? row('Product Component', tc.productComponent) : ''}
             ${tc.squadTeam ? row('Squad / Team', tc.squadTeam) : ''}
             ${tc.regressionTests ? row('Regression Tests?', tc.regressionTests) : ''}
+            ${tc.automationType && tc.automationType !== 'None' ? row('Automation Type', tc.automationType) : ''}
           </table>
           ${renderPreconditionImages(tc.preconditionImages)}
           ${tc.scenario ? `<div class="bdd"><pre>${esc(tc.scenario)}</pre></div>` : ''}
@@ -252,6 +253,7 @@ function register() {
             ${tc.productComponent ? row('Component', tc.productComponent) : ''}
             ${tc.squadTeam ? row('Squad / Team', tc.squadTeam) : ''}
             ${tc.regressionTests ? row('Regression?', tc.regressionTests) : ''}
+            ${tc.automationType && tc.automationType !== 'None' ? row('Automation Type', tc.automationType) : ''}
           </table>
           ${tc.scenario ? `<div class="bdd"><pre>${esc(tc.scenario)}</pre></div>` : ''}
         </div>`).join('')
@@ -342,7 +344,6 @@ function register() {
     shell.openExternal('file://' + reportPath)
     return { path: reportPath }
   })
-}
 
   ipcMain.handle('generate-docx-report', async (_, { issueInfo, configNotes, qaNotes, impacts, cases }) => {
     const date = new Date().toLocaleString('en-GB')
@@ -423,6 +424,7 @@ function register() {
       if (tc.productComponent) rows.push(metaRow('Product Component', tc.productComponent))
       if (tc.squadTeam) rows.push(metaRow('Squad / Team', tc.squadTeam))
       if (tc.regressionTests) rows.push(metaRow('Regression Tests?', tc.regressionTests))
+      if (tc.automationType && tc.automationType !== 'None') rows.push(metaRow('Automation Type', tc.automationType))
 
       return [
         new Paragraph({
@@ -518,5 +520,6 @@ function register() {
     shell.showItemInFolder(pdfPath)
     return { path: pdfPath }
   })
+}
 
 module.exports = { register }

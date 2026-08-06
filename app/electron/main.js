@@ -29,6 +29,7 @@ app.whenReady().then(() => {
   require('./ipc/sessions').register()
   require('./ipc/featureWriter').register()
   require('./ipc/metrics').register()
+  require('./ipc/coverage').register()
   createWindow()
 })
 
